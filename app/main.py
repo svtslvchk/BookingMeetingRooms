@@ -1,7 +1,9 @@
 import logging
+import os
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import HTTPException
+from fastapi.staticfiles import StaticFiles
 from app.routers import auth, users, room, booking
 
 
@@ -47,14 +49,17 @@ app.include_router(room.router)
 app.include_router(booking.router)
 
 
-@app.get("/")
-async def root():
-    return {"message": "API системы бронирования переговорных комнат работает стабильно."}
-
-
 @app.get("/test-500")
 async def trigger_unexpected_error():
     """Тестовый эндпоинт, чтобы проверить работу хендлера."""
     # Искусственно вызываем падение, которого нет в HTTPException
     division_by_zero = 1 / 0
     return {"result": division_by_zero}
+
+
+@app.get("/", response_class=FileResponse)
+async def read_root():
+    index_path = os.path.join("app", "static", "index.html")
+    return FileResponse(index_path)
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")

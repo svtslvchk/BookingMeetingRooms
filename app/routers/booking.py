@@ -1,7 +1,9 @@
+# app/routers/booking.py
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import List, Optional
 
 from app.dependencies.auth import get_current_user, get_db
 from app.models.user import User
@@ -29,17 +31,37 @@ async def create_booking(
         )
         return booking
     except ValueError as e:
-        # Ошибки валидации времени (в прошлом, старт >= конец)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except RoomAlreadyBookedError as e:
-        # Ошибка пересечения интервалов
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e)
         )
+
+
+@router.get("", response_model=List[BookingOut])
+async def get_bookings(
+    room_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Возвращает список бронирований. 
+    Если передан room_id, фильтрует брони конкретной комнаты для расписания.
+    """
+    stmt = select(Booking)
+    
+    # Если фронтенд передал ?room_id=..., добавляем фильтрацию
+    if room_id is not None:
+        stmt = stmt.where(Booking.room_id == room_id)
+        
+    stmt = stmt.order_by(Booking.time_start)
+    
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 @router.get("/my", response_model=List[BookingOut])

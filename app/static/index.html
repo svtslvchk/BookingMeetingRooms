@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель управления бронированием</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        .hidden { display: none; }
+        .booking-item { 
+            padding: 0.75rem; 
+            margin-bottom: 0.5rem; 
+            border-left: 4px solid #10ad61; 
+            background: rgba(16, 173, 97, 0.05);
+            border-radius: 0 4px 4px 0;
+        }
+        .room-card { 
+            cursor: pointer; 
+            transition: transform 0.2s; 
+        }
+        .room-card:hover { 
+            transform: translateY(-2px); 
+            border-color: var(--primary);
+        }
+        nav { border-bottom: 1px solid var(--muted-border-color); margin-bottom: 2rem; }
+    </style>
+</head>
+<body>
+    <nav class="container hidden" id="main-nav">
+        <ul>
+            <li><strong>БроньПереговорных.РФ</strong></li>
+        </ul>
+        <ul>
+            <li><span id="user-profile-info" style="font-size: 0.9rem; color: var(--muted-color);">Загрузка профиля...</span></li>
+            <li><a href="#" onclick="logout()" class="secondary" style="font-size: 0.9rem;">Выйти</a></li>
+        </ul>
+    </nav>
+
+    <main class="container">
+        <section id="auth-section">
+            <article style="max-width: 500px; margin: 4px auto;">
+                <h3>Вход в систему</h3>
+                <form id="login-form">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" placeholder="user@example.com" required>
+                    <label for="password">Пароль</label>
+                    <input type="password" id="password" placeholder="••••••••" required>
+                    <button type="submit">Войти</button>
+                </form>
+                <p id="auth-error" style="color: red;"></p>
+            </article>
+        </section>
+
+        <section id="main-section" class="hidden">
+            
+            <div class="grid">
+                <div>
+                    <article>
+                        <h5>➕ Забронировать комнату</h5>
+                        <form id="booking-form">
+                            <label for="room-select">Комната</label>
+                            <select id="room-select" required>
+                                <option value="" disabled selected>Загрузка комнат...</option>
+                            </select>
+
+                            <div class="grid">
+                                <div>
+                                    <label for="time-start">Начало</label>
+                                    <input type="datetime-local" id="time-start" required value="2026-07-04T14:00">
+                                </div>
+                                <div>
+                                    <label for="time-end">Окончание</label>
+                                    <input type="datetime-local" id="time-end" required value="2026-07-04T15:00">
+                                </div>
+                            </div>
+                            <button type="submit" class="button">Создать бронь</button>
+                        </form>
+                        <p id="booking-message" style="font-size: 0.9rem;"></p>
+                    </article>
+
+                    <article>
+                        <h5>🏢 Создать новую переговорную</h5>
+                        <form id="room-form">
+                            <label for="room-name">Название комнаты</label>
+                            <input type="text" id="room-name" placeholder="Например: Марс" required>
+                            
+                            <label for="room-capacity">Вместимость (чел.)</label>
+                            <input type="number" id="room-capacity" placeholder="8" min="1" required>
+                            
+                            <button type="submit" class="contrast">Добавить комнату</button>
+                        </form>
+                        <p id="room-message" style="font-size: 0.9rem;"></p>
+                    </article>
+                </div>
+
+                <div>
+                    <article>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h5 style="margin: 0;">📋 Доступные комнаты</h5>
+                            <button onclick="loadRooms()" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; width: auto;">🔄</button>
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--muted-color);">* Нажми на комнату, чтобы посмотреть её расписание</p>
+                        <div id="rooms-list">Загрузка...</div>
+                    </article>
+
+                    <article id="schedule-box" class="hidden">
+                        <h5>📅 Расписание: <span id="schedule-room-name" style="color: var(--primary);"></span></h5>
+                        <div id="schedule-list">Нет бронирований на эту комнату.</div>
+                    </article>
+
+                    <article>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h5 style="margin: 0;">👤 Мои бронирования</h5>
+                            <button onclick="loadMyBookings()" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; width: auto;">🔄</button>
+                        </div>
+                        <div id="my-bookings-list">У вас пока нет бронирований.</div>
+                    </article>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            if (localStorage.getItem("token")) { showMainSection(); }
+        });
+
+        // Вспомогательная функция для заголовков авторизации
+        function getAuthHeaders() {
+            return {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem("token")}`
+            };
+        }
+
+        // 1. ЛОГИН
+        document.getElementById("login-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            try {
+                const response = await fetch("/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    localStorage.setItem("token", data.access_token);
+                    showMainSection();
+                } else {
+                    document.getElementById("auth-error").innerText = data.detail || "Ошибка входа";
+                }
+            } catch {
+                document.getElementById("auth-error").innerText = "Ошибка сервера";
+            }
+        });
+
+        // 2. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
+        async function loadUserProfile() {
+            try {
+                const response = await fetch("/users/me", { headers: getAuthHeaders() });
+                if (response.ok) {
+                    const user = await response.json();
+                    document.getElementById("user-profile-info").innerText = `Вы вошли как: ${user.email}`;
+                }
+            } catch (err) { console.log("Не удалось загрузить профиль"); }
+        }
+
+        // 3. ЗАГРУЗКА КОМНАТ
+        async function loadRooms() {
+            try {
+                const response = await fetch("/rooms", { headers: getAuthHeaders() });
+                if (response.ok) {
+                    const rooms = await response.json();
+                    const listContainer = document.getElementById("rooms-list");
+                    const select = document.getElementById("room-select");
+                    
+                    listContainer.innerHTML = "";
+                    select.innerHTML = '<option value="" disabled selected>Выберите комнату...</option>';
+
+                    rooms.forEach(room => {
+                        // Элемент списка комнат
+                        const div = document.createElement("div");
+                        div.className = "room-card booking-item";
+                        div.innerHTML = `<strong>${room.name}</strong> — Вместимость: ${room.capacity} чел.`;
+                        div.onclick = () => loadRoomSchedule(room.id, room.name);
+                        listContainer.appendChild(div);
+
+                        // Опция в селекте
+                        const opt = document.createElement("option");
+                        opt.value = room.id;
+                        opt.innerText = room.name;
+                        select.appendChild(opt);
+                    });
+                } else if (response.status === 401) { logout(); }
+            } catch {  }
+        }
+
+        // 4. РАСПИСАНИЕ ОПРЕДЕЛЕННОЙ КОМНАТЫ
+        async function loadRoomSchedule(roomId, roomName) {
+            const scheduleBox = document.getElementById("schedule-box");
+            const scheduleList = document.getElementById("schedule-list");
+            document.getElementById("schedule-room-name").innerText = roomName;
+            scheduleBox.classList.remove("hidden");
+
+            try {
+                // Делаем GET запрос на бронирования с фильтром по комнате
+                const response = await fetch(`/bookings?room_id=${roomId}`, { headers: getAuthHeaders() });
+                if (response.ok) {
+                    const bookings = await response.json();
+                    scheduleList.innerHTML = "";
+                    
+                    if(bookings.length === 0) {
+                        scheduleList.innerHTML = "<ins>Свободно на весь день. Бронирований нет.</ins>";
+                        return;
+                    }
+
+                    bookings.forEach(b => {
+                        const start = new Date(b.time_start).toLocaleString('ru-RU', {hour: '2-digit', minute:'2-digit', day: 'numeric', month: 'short'});
+                        const end = new Date(b.time_end).toLocaleString('ru-RU', {hour: '2-digit', minute:'2-digit'});
+                        
+                        scheduleList.innerHTML += `<div style='font-size:0.9rem; margin-bottom:4px;'>🕒 <b>${start} - ${end}</b> (ID Юзера: ${b.user_id})</div>`;
+                    });
+                }
+            } catch {
+                scheduleList.innerHTML = "Ошибка загрузки расписания.";
+            }
+        }
+
+        // 5. МОИ БРОНИРОВАНИЯ
+        async function loadMyBookings() {
+            const container = document.getElementById("my-bookings-list");
+            try {
+                const response = await fetch("/bookings/my", { headers: getAuthHeaders() });
+                if (response.ok) {
+                    const bookings = await response.json();
+                    container.innerHTML = "";
+
+                    if (bookings.length === 0) {
+                        container.innerHTML = "<small>Активных бронирований нет</small>";
+                        return;
+                    }
+
+                    bookings.forEach(b => {
+                        const start = new Date(b.time_start).toLocaleString('ru-RU', {hour: '2-digit', minute:'2-digit', day: 'numeric', month: 'short'});
+                        const end = new Date(b.time_end).toLocaleString('ru-RU', {hour: '2-digit', minute:'2-digit'});
+                        container.innerHTML += `<div class='booking-item' style='border-left-color: #ffaa00;'>Комната ID: ${b.room_id}<br><small>С ${start} по ${end}</small></div>`;
+                    });
+                }
+            } catch { container.innerHTML = "Ошибка загрузки списка"; }
+        }
+
+        // 6. СОЗДАНИЕ БРОНИ (POST /bookings)
+        document.getElementById("booking-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById("booking-message");
+            const roomId = document.getElementById("room-select").value;
+            
+            try {
+                const response = await fetch("/bookings", {
+                    method: "POST",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        room_id: parseInt(roomId),
+                        time_start: document.getElementById("time-start").value,
+                        time_end: document.getElementById("time-end").value
+                    })
+                });
+                const data = await response.json();
+                if (response.ok || response.status === 201) {
+                    msg.style.color = "green"; msg.innerText = "Успешно забронировано!";
+                    loadMyBookings();
+                    // Обновляем расписание текущей открытой комнаты, если нужно
+                    if(roomId) loadRoomSchedule(roomId, document.getElementById("room-select").options[document.getElementById("room-select").selectedIndex].text);
+                } else {
+                    msg.style.color = "red"; msg.innerText = data.detail || "Ошибка пересечения времени!";
+                }
+            } catch { msg.style.color = "red"; msg.innerText = "Ошибка запроса"; }
+        });
+
+        // 7. СОЗДАНИЕ КОМНАТЫ (POST /rooms)
+        document.getElementById("room-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById("room-message");
+            try {
+                const response = await fetch("/rooms", {
+                    method: "POST",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        name: document.getElementById("room-name").value,
+                        capacity: parseInt(document.getElementById("room-capacity").value)
+                    })
+                });
+                if (response.ok || response.status === 201) {
+                    msg.style.color = "green"; msg.innerText = "Комната успешно добавлена!";
+                    document.getElementById("room-form").reset();
+                    loadRooms(); // Обновляем списки
+                } else {
+                    const data = await response.json();
+                    msg.style.color = "red"; msg.innerText = data.detail || "Ошибка создания";
+                }
+            } catch { msg.style.color = "red"; msg.innerText = "Ошибка сервера"; }
+        });
+
+        // Интерфейсные переключатели
+        function showMainSection() {
+            document.getElementById("auth-section").classList.add("hidden");
+            document.getElementById("main-nav").classList.remove("hidden");
+            document.getElementById("main-section").classList.remove("hidden");
+            loadUserProfile();
+            loadRooms();
+            loadMyBookings();
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            document.getElementById("main-nav").classList.add("hidden");
+            document.getElementById("main-section").classList.add("hidden");
+            document.getElementById("schedule-box").classList.add("hidden");
+            document.getElementById("auth-section").classList.remove("hidden");
+            document.getElementById("login-form").reset();
+        }
+    </script>
+</body>
+</html>
